@@ -166,6 +166,7 @@ const state = {
   bids: new Map(), // token -> { lotId, amount, timestamp }
   resultLogs: [],
   secretHistory: [], // list of secret wins for final reveal
+  appearedLots: [], // all lots appeared in this game
   chatHistory: [],
 };
 
@@ -302,6 +303,22 @@ function broadcastState() {
       secretHistory: state.phase === 'GAME_OVER' ? state.secretHistory : [],
       players: publicPlayers,
       rankings: (state.phase === 'GAME_OVER' || isHost) ? rawRankings : safeRankings,
+      appearedPropertiesRankings: state.phase === 'GAME_OVER'
+        ? [...state.appearedLots]
+            .sort((a, b) => b.appraisal - a.appraisal)
+            .map((lot, idx) => ({
+              rank: idx + 1,
+              round: lot.round,
+              name: lot.name,
+              region: lot.region,
+              type: lot.type,
+              emoji: lot.emoji,
+              appraisal: lot.appraisal,
+              winnerNickname: lot.winnerNickname || null,
+              winningBid: lot.winningBid || 0,
+              isSecret: Boolean(lot.isSecret),
+            }))
+        : [],
       isHostView: isHost,
     });
   }
@@ -364,14 +381,17 @@ function startBiddingPhase() {
   state.currentLots = picked.map((p) => {
     // 최종 평가가 = 기준 감정가 고정
     const finalValue = p.appraisal;
-    return {
+    const lotObj = {
       ...p,
+      round: state.round,
       finalValue,
       winnerToken: null,
       winnerNickname: null,
       winningBid: 0,
       isSecret: false,
     };
+    state.appearedLots.push(lotObj);
+    return lotObj;
   });
 
   startTimer(90, settleRound);
@@ -593,6 +613,7 @@ io.on('connection', (socket) => {
     state.totalRounds = (Number.isFinite(roundsNum) && roundsNum >= 1 && roundsNum <= 15) ? roundsNum : 15;
     state.round = 0;
     state.secretHistory = [];
+    state.appearedLots = [];
     state.chatHistory = [];
     prepareDeck();
 
@@ -659,6 +680,7 @@ io.on('connection', (socket) => {
     state.bids.clear();
     state.resultLogs = [];
     state.secretHistory = [];
+    state.appearedLots = [];
 
     for (const p of state.players.values()) {
       p.cash = STARTING_CASH;

@@ -481,6 +481,22 @@
                 `).join('')}
               </div>
             ` : ''}
+            ${(st.appearedPropertiesRankings && st.appearedPropertiesRankings.length > 0) ? `
+              <div class="pt-3 border-t border-slate-800 space-y-2">
+                <h4 class="text-xs font-bold text-sky-300">🏢 출품 매물 감정가 순위 (${st.appearedPropertiesRankings.length}곳)</h4>
+                <div class="space-y-1.5 max-h-80 overflow-y-auto pr-1">
+                  ${st.appearedPropertiesRankings.map((p) => `
+                    <div class="px-3 py-2 rounded-xl bg-slate-900/85 border border-slate-800 flex items-center justify-between gap-2 text-xs">
+                      <div class="min-w-0">
+                        <div class="font-bold text-white truncate"><span class="text-amber-300 mr-1">${p.rank}위</span> ${p.emoji} ${escapeHtml(p.name)}</div>
+                        <div class="text-[10px] text-slate-400">${p.round}R · ${escapeHtml(p.region)} · ${p.winnerNickname ? `낙찰: ${escapeHtml(p.winnerNickname)} (${fmtBillion(p.winningBid)})` : '유찰'}</div>
+                      </div>
+                      <div class="shrink-0 font-mono font-bold text-sky-300">${fmtBillion(p.appraisal)}</div>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
           </div>
         `;
       }
