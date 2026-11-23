@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>부동산 시크릿 경매 · 전광판</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="/socket.io/socket.io.js"></script>
+  <style>
+    body { background-color: #050811; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Pretendard", "Segoe UI", sans-serif; }
+    .panel { background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(255, 255, 255, 0.08); }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <div id="pinOverlay" class="fixed inset-0 z-50 bg-slate-950/95 flex items-center justify-center p-6">
+    <div class="panel rounded-3xl p-8 max-w-sm w-full space-y-5 text-center shadow-2xl">
+      <div class="text-4xl">🔐</div>
+      <h1 class="text-xl font-bold text-amber-400">전광판 관리자 인증</h1>
+      <input id="hostPinInput" type="password" inputmode="numeric" maxlength="8" placeholder="관리자 PIN 입력"
+        onkeydown="if(event.key==='Enter') authHost()"
+        class="w-full px-4 py-3.5 rounded-xl bg-slate-900 border border-slate-700 text-center text-lg tracking-widest text-white focus:outline-none focus:border-amber-400" />
+      <p id="hostPinErr" class="text-xs text-rose-400 hidden"></p>
+      <button onclick="authHost()" class="w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-sm">
+        전광판 잠금 해제
+      </button>
+    </div>
+  </div>
+
+  <header class="panel px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+    <div class="flex items-center gap-3">
+      <span class="text-3xl">🏙️</span>
+      <div>
+        <h1 class="text-2xl font-extrabold text-amber-400 tracking-tight">한국 부동산 시크릿 경매</h1>
+        <p id="hostPhaseLabel" class="text-sm text-slate-400">대기실 · 참가자 입장 중</p>
+      </div>
+    </div>
+
+    <div class="flex items-center gap-4">
+      <div id="hostTimer" class="hidden px-5 py-2 rounded-2xl bg-slate-900 border border-amber-500/50 text-amber-300 font-mono text-3xl font-black">00s</div>
+      <button onclick="toggleRankAmounts()" id="rankAmtBtn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 border border-slate-700">💰 순위 금액 OFF</button>
+      <button onclick="toggleTts()" id="ttsBtn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-300 border border-emerald-500/30">🔊 음성 안내 ON</button>
+      <div id="hostToolbar" class="flex items-center gap-2"></div>
+    </div>
+  </header>
+
+  <main class="flex-1 p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 max-w-7xl w-full mx-auto">
+    <section id="boardMain" class="lg:col-span-8 space-y-6"></section>
+
+    <aside class="lg:col-span-4 space-y-6">
+      <div class="panel rounded-3xl p-5 text-center space-y-3">
+        <h2 class="text-sm font-bold text-amber-300">📱 스마트폰 QR 입장</h2>
+        <img id="hostQrImg" src="" alt="Join QR" class="mx-auto w-44 h-44 rounded-2xl bg-white p-2" />
+        <p id="hostQrUrl" class="text-xs text-slate-400 break-all"></p>
+      </div>
+
+      <div class="panel rounded-3xl p-5 space-y-3">
+        <div class="flex items-center justify-between">
+          <h2 class="text-sm font-bold text-white">참가자 현황 (<span id="playerCount">0</span>/35)</h2>
+          <span class="text-[11px] text-slate-400">✕ 클릭 시 강퇴</span>
+        </div>
+        <div id="hostPlayerList" class="space-y-2 max-h-[420px] overflow-y-auto pr-1"></div>
+      </div>
+    </aside>
+  </main>
+
+  <script>
+    const socket = io();
+    let hostToken = localStorage.getItem('re_host_token') || null;
+    let selectedRounds = 15;
+    let ttsEnabled = true;
+    let showRankAmounts = false;
+    let latestHostState = null;
+    let lastSpokenKey = null;
+
+    function fmtBillion(units) {
+      return `${(units / 10).toFixed(1)}억`;
+    }
+
+    window.addEventListener('DOMContentLoaded', async () => {
+      const joinUrl = `${window.location.origin}/`;
+      document.getElementById('hostQrUrl').textContent = joinUrl;
+      const res = await fetch(`/api/qr?url=${encodeURIComponent(joinUrl)}`);
+      const data = await res.json();
+      document.getElementById('hostQrImg').src = data.dataUrl;
+
+      if (hostToken) {
+        socket.emit('host:auth', { hostToken }, (r) => {
+          if (r?.ok) unlockHost();
+          else localStorage.removeItem('re_host_token');
+        });
+      }
+    });
+
+    function authHost() {
+      const pin = document.getElementById('hostPinInput').value;
+      const err = document.getElementById('hostPinErr');
+      err.classList.add('hidden');
+      socket.emit('host:auth', { pin }, (res) => {
+        if (!res?.ok) {
+          err.textContent = res?.error || 'PIN이 일치하지 않습니다.';
+          err.classList.remove('hidden');
+          return;
+        }
+        localStorage.setItem('re_host_token', res.hostToken);
+        hostToken = res.hostToken;
+        unlockHost();
+      });
+    }
+
+    function unlockHost() {
+      document.getElementById('pinOverlay').classList.add('hidden');
+      socket.emit('game:request_state');
+    }
+
+    function toggleRankAmounts() {
+      showRankAmounts = !showRankAmounts;
+      const btn = document.getElementById('rankAmtBtn');
+      btn.textContent = showRankAmounts ? '💰 순위 금액 ON' : '💰 순위 금액 OFF';
+      btn.className = showRankAmounts
+        ? 'px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-xs font-bold text-amber-300 border border-amber-400/50'
+        : 'px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 border border-slate-700';
+      if (latestHostState) renderHostState(latestHostState);
+    }
+
+    function toggleTts() {
+      ttsEnabled = !ttsEnabled;
+      const btn = document.getElementById('ttsBtn');
+      btn.textContent = ttsEnabled ? '🔊 음성 안내 ON' : '🔇 음성 안내 OFF';
+      btn.className = ttsEnabled
+        ? 'px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-300 border border-emerald-500/30'
+        : 'px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-400 border border-slate-700';
+    }
+
+    function speakKorean(text) {
+      if (!ttsEnabled || !('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.lang = 'ko-KR';
+      utter.rate = 1.05;
+      window.speechSynthesis.speak(utter);
+    }
+
+    socket.on('game:tick', ({ timer, paused }) => {
+      const el = document.getElementById('hostTimer');
+      el.classList.remove('hidden');
+      el.textContent = paused ? `⏸ ${timer}s` : `${timer}s`;
+    });
+
+    socket.on('game:state', (st) => {
+      latestHostState = st;
+      renderHostState(st);
+    });
+
+    function setRounds(n) { selectedRounds = n; socket.emit('game:request_state'); }
+    function startGame() {
+      socket.emit('host:start_game', { totalRounds: selectedRounds }, (r) => {
+        if (!r?.ok) alert(r?.error || '시작할 수 없습니다.');
+      });
+    }
+    function pauseResume() { socket.emit('host:pause_resume'); }
+    function extendTime() { socket.emit('host:extend_time', { seconds: 30 }); }
+    function nextPhase() { socket.emit('host:next_phase'); }
+    function kickPlayer(token) { socket.emit('host:kick_player', { targetToken: token }); }
+    function resetGame() {
+      if (confirm('경매를 초기화하고 대기실로 돌아갈까요?')) socket.emit('host:reset_game');
+    }
+
+    function renderHostState(st) {
+      const phaseNames = {
+        LOBBY: '대기실 · 참가자 입장 중',
+        BIDDING: `${st.round}/${st.totalRounds} 라운드 · 3개 매물 중 1곳 블라인드 입찰`,
+        RESULT: `${st.round}/${st.totalRounds} 라운드 · 낙찰 결과 및 시크릿 처리`,
+        GAME_OVER: '최종 부동산 자산 순위 발표',
+      };
+      document.getElementById('hostPhaseLabel').textContent = phaseNames[st.phase] || st.phase;
+
+      const timerEl = document.getElementById('hostTimer');
+      if (st.phase === 'LOBBY' || st.phase === 'GAME_OVER') {
+        timerEl.classList.add('hidden');
+      } else {
+        timerEl.classList.remove('hidden');
+        timerEl.textContent = st.paused ? `⏸ ${st.timer}s` : `${st.timer}s`;
+      }
+
+      const speakKey = `${st.phase}_${st.round}_${st.phaseNonce}`;
+      if (lastSpokenKey !== speakKey) {
+        lastSpokenKey = speakKey;
+        if (st.phase === 'BIDDING') speakKorean(`${st.round}라운드 경매가 시작되었습니다. 3개 매물 중 한 곳에만 입찰하세요.`);
+        else if (st.phase === 'RESULT') speakKorean(`${st.round}라운드 낙찰 결과를 공개합니다. 최고가 낙찰 건물의 금액은 시크릿 처리됩니다.`);
+        else if (st.phase === 'GAME_OVER') speakKorean(`모든 경매가 종료되었습니다. 시크릿 매물과 최종 순위를 확인하세요.`);
+      }
+
+      const toolbar = document.getElementById('hostToolbar');
+      if (st.phase === 'LOBBY') {
+        toolbar.innerHTML = `
+          <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-700">
+            ${[5, 10, 15].map((r) => `
+              <button onclick="setRounds(${r})" class="px-3 py-1.5 rounded-lg text-xs font-bold ${selectedRounds === r ? 'bg-amber-500 text-slate-950' : 'text-slate-300'}">${r}R</button>
+            `).join('')}
+          </div>
+          <button onclick="startGame()" class="px-5 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-extrabold text-sm">▶ 경매 시작</button>
+        `;
+      } else {
+        toolbar.innerHTML = `
+          <button onclick="pauseResume()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold">${st.paused ? '▶ 재개' : '⏸ 일시정지'}</button>
+          <button onclick="nextPhase()" class="px-3.5 py-2 rounded-xl bg-sky-600 hover:bg-sky-500 text-xs font-bold">⏭ 다음 단계</button>
+          <button onclick="resetGame()" class="px-3.5 py-2 rounded-xl bg-rose-600/80 hover:bg-rose-500 text-xs font-bold">🔄 초기화</button>
+        `;
+      }
+
+      document.getElementById('playerCount').textContent = st.players.length;
+      document.getElementById('hostPlayerList').innerHTML = st.players.map((p) => `
+        <div class="flex items-center justify-between px-3 py-2 rounded-xl bg-slate-900/90 border border-slate-800 text-xs">
+          <div class="flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full ${p.connected ? 'bg-emerald-400' : 'bg-rose-500'}"></span>
+            <span class="font-bold text-white">${escapeHtml(p.nickname)}</span>
+            ${st.phase === 'BIDDING' && p.hasBid ? '<span class="px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-300 text-[10px]">입찰완료</span>' : ''}
+          </div>
+          <div class="flex items-center gap-2">
+            <span class="text-slate-400">${p.propertyCount}채</span>
+            <button onclick="kickPlayer('${p.token}')" class="text-rose-400 hover:text-rose-300 font-bold px-1">✕</button>
+          </div>
+        </div>
+      `).join('');
+
+      const board = document.getElementById('boardMain');
+      if (st.phase === 'LOBBY') {
+        board.innerHTML = `
+          <div class="panel rounded-3xl p-8 space-y-6">
+            <h2 class="text-2xl font-extrabold text-white">📜 한국 부동산 시크릿 경매 안내</h2>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div class="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+                <div class="text-2xl">🏢</div>
+                <h3 class="font-bold text-amber-300">1. 3개 중 1곳만 입찰</h3>
+                <p class="text-xs text-slate-400 leading-relaxed">매 라운드 실제 한국 아파트·주상복합 3곳이 출품되며, 딱 1곳에만 비밀 입찰할 수 있습니다.</p>
+              </div>
+              <div class="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+                <div class="text-2xl">🔒</div>
+                <h3 class="font-bold text-purple-300">2. 최고가 건물 시크릿</h3>
+                <p class="text-xs text-slate-400 leading-relaxed">동일 금액 2인 이상 중복 시 차순위 단독 입찰자가 낙찰받으며, 최고 낙찰가 건물의 금액만 🔒 시크릿 처리됩니다.</p>
+              </div>
+              <div class="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 space-y-2">
+                <div class="text-2xl">🏆</div>
+                <h3 class="font-bold text-emerald-400">3. 최종 자산 랭킹</h3>
+                <p class="text-xs text-slate-400 leading-relaxed">게임 종료 시 시크릿 매물 정체와 함께 현금+부동산 감정가 합산 1위~N위가 공개됩니다.</p>
+              </div>
+            </div>
+          </div>
+        `;
+        return;
+      }
+
+      if (st.phase === 'GAME_OVER') {
+        board.innerHTML = `
+          <div class="panel rounded-3xl p-8 space-y-6 border-amber-500/40">
+            <div class="text-center space-y-1">
+              <div class="text-5xl">🏆</div>
+              <h2 class="text-3xl font-black text-amber-400">최종 부동산 자산 랭킹</h2>
+            </div>
+            <div class="space-y-3">
+              ${st.rankings.map((r) => {
+                const medal = r.rank === 1 ? '🥇 1위' : r.rank === 2 ? '🥈 2위' : r.rank === 3 ? '🥉 3위' : `${r.rank}위`;
+                return `
+                  <div class="p-4 rounded-2xl ${r.rank === 1 ? 'bg-amber-500/20 border-amber-400' : 'bg-slate-900/80 border-slate-800'} border flex items-center justify-between">
+                    <div class="flex items-center gap-4">
+                      <span class="text-xl font-black w-16">${medal}</span>
+                      <div>
+                        <div class="text-lg font-extrabold text-white">${escapeHtml(r.nickname)}</div>
+                        <div class="text-xs text-slate-400">현금 ${fmtBillion(r.cash)} · 부동산 ${fmtBillion(r.propTotal)} (${r.propertyCount}채)</div>
+                      </div>
+                    </div>
+                    <div class="text-2xl font-mono font-black text-amber-400">${fmtBillion(r.totalAsset)}</div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+            ${st.secretHistory.length > 0 ? `
+              <div class="pt-4 border-t border-slate-800 space-y-2">
+                <h3 class="text-base font-bold text-purple-300">🔓 역대 시크릿 매물 공개</h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  ${st.secretHistory.map((s) => `
+                    <div class="px-4 py-2.5 rounded-xl bg-purple-950/30 border border-purple-500/40 text-sm text-slate-200">
+                      ${s.round}R <strong>${escapeHtml(s.name)}</strong> → <span class="text-amber-300 font-bold">${escapeHtml(s.winnerNickname)}</span> (${fmtBillion(s.winningBid)})
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            ` : ''}
+          </div>
+        `;
+        return;
+      }
+
+      // BIDDING / RESULT 공통 3개 매물 보드
+      board.innerHTML = `
+        <div class="panel rounded-3xl p-6 space-y-4">
+          <h2 class="text-lg font-bold text-amber-300">🏢 ${st.round}라운드 출품 매물 (3곳 중 1곳만 입찰)</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+            ${st.lots.map((l) => `
+              <div class="p-5 rounded-2xl ${l.isSecretMasked ? 'bg-purple-950/40 border-purple-500/60' : 'bg-slate-900/90 border-slate-700'} border space-y-2">
+                <div class="flex items-center justify-between text-xs">
+                  <span class="px-2 py-0.5 rounded bg-slate-800 text-slate-300">${l.type}</span>
+                  <span class="font-mono text-amber-300 font-bold">감정가 ${fmtBillion(l.appraisal)}</span>
+                </div>
+                <div class="text-xl font-extrabold text-white">${l.emoji} ${escapeHtml(l.name)}</div>
+                <div class="text-xs font-semibold text-sky-300">📍 ${escapeHtml(l.region)}</div>
+                ${st.phase === 'RESULT' ? `
+                  <div class="pt-3 mt-2 border-t border-slate-800 flex items-center justify-between text-sm font-bold">
+                    <span class="${l.winnerNickname ? 'text-emerald-300' : 'text-slate-400'}">
+                      ${!l.winnerNickname ? (l.allTied ? '💥 중복 유찰' : '💨 유찰') : `👤 ${escapeHtml(l.winnerNickname)}`}
+                    </span>
+                    <span class="font-mono ${l.isSecretMasked ? 'text-purple-300' : 'text-amber-400'}">
+                      ${!l.winnerNickname ? '-' : l.isSecretMasked ? '🔒 시크릿' : fmtBillion(l.winningBid)}
+                    </span>
+                  </div>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+
+        ${st.phase === 'RESULT' ? `
+          <div class="panel rounded-3xl p-6 space-y-4">
+            <h2 class="text-lg font-bold text-emerald-400">⚖️ ${st.round}라운드 정산 로그</h2>
+            <div class="space-y-2">
+              ${st.resultLogs.map((log) => `
+                <div class="p-3.5 rounded-2xl bg-slate-900 border border-slate-800 text-sm text-slate-100">${escapeHtml(log)}</div>
+              `).join('')}
+            </div>
+            <div class="pt-4 border-t border-slate-800 space-y-3">
+              <h3 class="text-base font-bold text-amber-300">📋 참가자별 누적 낙찰 매물 현황</h3>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                ${st.players.map((p) => {
+                  const list = p.wonPropertiesSummary || [];
+                  return `
+                    <div class="p-3 rounded-2xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+                      <div class="text-sm font-bold text-white">${escapeHtml(p.nickname)} <span class="text-xs text-slate-400 font-normal">(${list.length}채)</span></div>
+                      <div class="flex flex-wrap gap-1.5">
+                        ${list.length === 0 ? '<span class="text-xs text-slate-500">낙찰 매물 없음</span>' : list.map((pr) => `
+                          <span class="px-2 py-0.5 rounded-lg bg-slate-800 border ${pr.wasSecret ? 'border-purple-500/50 text-purple-300' : 'border-slate-700 text-slate-200'} text-xs">
+                            ${pr.round}R ${pr.emoji} ${escapeHtml(pr.name)}
+                          </span>
+                        `).join('')}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+            <div class="pt-4 border-t border-slate-800 space-y-3">
+              <div class="flex items-center justify-between">
+                <h3 class="text-base font-bold text-emerald-300">🏅 ${st.round}라운드 중간 순위</h3>
+                <span class="text-xs text-slate-400">${showRankAmounts ? '방장 금액 공개 ON (현금 + 건물 감정가)' : '자산 총액 비공개 · 순위만 공개'}</span>
+              </div>
+              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                ${(st.rankings || []).map((r) => {
+                  const medal = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : `${r.rank}위`;
+                  const hasAmt = showRankAmounts && typeof r.totalAsset === 'number';
+                  return `
+                    <div class="px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2 text-sm">
+                      <div class="flex items-center gap-2.5 min-w-0">
+                        <span class="font-extrabold text-amber-300 shrink-0">${medal}</span>
+                        <span class="font-bold text-white truncate">${escapeHtml(r.nickname)}</span>
+                      </div>
+                      ${hasAmt ? `<span class="shrink-0 font-mono text-xs font-bold text-amber-300">${fmtBillion(r.totalAsset)} <span class="text-slate-400 font-normal">(현금 ${fmtBillion(r.cash)} + 매물 ${fmtBillion(r.propTotal)})</span></span>` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          </div>
+        ` : ''}
+      `;
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
