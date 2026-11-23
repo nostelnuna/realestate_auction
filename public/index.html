@@ -500,7 +500,6 @@
                   <button onclick="pickLot('${l.id}')" class="tap-btn w-full text-left p-3.5 rounded-xl border ${selected ? 'bg-amber-500/20 border-amber-400' : 'bg-slate-900/80 border-slate-700'}">
                     <div class="flex items-center justify-between text-[11px]">
                       <span class="px-2 py-0.5 rounded bg-sky-500/15 text-sky-300 font-semibold">📍 ${escapeHtml(l.region)} · ${l.type}</span>
-                      <span class="px-2 py-0.5 rounded bg-slate-800 text-amber-300 font-mono font-bold">감정가 ${fmtBillion(l.appraisal)}</span>
                     </div>
                     <div class="font-bold text-base text-white mt-1">${l.emoji} ${escapeHtml(l.name)}</div>
                   </button>
@@ -514,13 +513,17 @@
               <h3 class="font-bold text-sm text-white">2️⃣ 입찰 금액 설정</h3>
               <span class="font-mono font-extrabold text-xl text-amber-400">${fmtBillion(selectedBidUnits)}</span>
             </div>
-            <div class="grid grid-cols-6 gap-1.5 mb-3">
+            <div class="grid grid-cols-4 gap-1.5 mb-3">
+              <button onclick="adjustBid(-50)" class="tap-btn py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-bold text-rose-300 border border-slate-700">-5억</button>
+              <button onclick="adjustBid(-10)" class="tap-btn py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-bold text-rose-300 border border-slate-700">-1억</button>
+              <button onclick="adjustBid(-5)" class="tap-btn py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-bold text-rose-300 border border-slate-700">-0.5억</button>
+              <button onclick="adjustBid(-1)" class="tap-btn py-2 rounded-lg bg-slate-900 hover:bg-slate-800 text-xs font-bold text-rose-300 border border-slate-700">-0.1억</button>
               <button onclick="adjustBid(1)" class="tap-btn py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold">+0.1억</button>
               <button onclick="adjustBid(5)" class="tap-btn py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold">+0.5억</button>
               <button onclick="adjustBid(10)" class="tap-btn py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold">+1억</button>
               <button onclick="adjustBid(50)" class="tap-btn py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold">+5억</button>
-              <button onclick="setBidMax()" class="tap-btn py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300">올인</button>
-              <button onclick="setBidZero()" class="tap-btn py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-400">포기</button>
+              <button onclick="setBidMax()" class="tap-btn col-span-2 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-amber-300">올인</button>
+              <button onclick="setBidZero()" class="tap-btn col-span-2 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-400">포기(0)</button>
             </div>
             <button onclick="submitBid()" class="tap-btn w-full py-3.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-extrabold text-sm shadow-lg shadow-amber-500/20">
               ${mySubmittedBid ? '입찰 수정하기' : '비밀 입찰 확정'}

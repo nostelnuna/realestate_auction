@@ -265,17 +265,25 @@ function broadcastState() {
     });
 
     const sanitizedLots = state.currentLots.map((lot) => {
-      if (state.phase === 'RESULT' && lot.isSecret) {
-        return {
-          ...lot,
-          winningBid: null,
-          isSecretMasked: true,
-        };
-      }
-      return {
-        ...lot,
+      const baseLot = {
+        id: lot.id,
+        name: lot.name,
+        region: lot.region,
+        type: lot.type,
+        emoji: lot.emoji,
+        winnerToken: lot.winnerToken,
+        winnerNickname: lot.winnerNickname,
+        winningBid: lot.winningBid,
+        allTied: lot.allTied,
+        wonByFallback: lot.wonByFallback,
+        isSecret: lot.isSecret,
         isSecretMasked: false,
       };
+      if (state.phase === 'RESULT' && lot.isSecret) {
+        baseLot.winningBid = null;
+        baseLot.isSecretMasked = true;
+      }
+      return baseLot;
     });
 
     s.emit('game:state', {
@@ -362,7 +370,7 @@ function startBiddingPhase() {
     };
   });
 
-  startTimer(120, settleRound);
+  startTimer(90, settleRound);
 }
 
 function settleRound() {
@@ -464,7 +472,7 @@ function settleRound() {
 
   state.resultLogs = logs;
 
-  startTimer(20, () => {
+  startTimer(30, () => {
     if (state.round >= state.totalRounds) {
       state.phase = 'GAME_OVER';
       state.phaseNonce += 1;
