@@ -597,6 +597,27 @@ io.on('connection', (socket) => {
     });
   });
 
+  socket.on('player:change_nickname', ({ newNickname }, callback) => {
+    const p = getPlayerBySocket(socket.id);
+    if (!p) return callback?.({ ok: false, error: '참가자 정보를 찾을 수 없습니다.' });
+    if (state.phase !== 'LOBBY') {
+      return callback?.({ ok: false, error: '게임이 시작된 후에는 닉네임을 변경할 수 없습니다.' });
+    }
+    const cleanName = String(newNickname || '').trim().slice(0, 16);
+    if (!cleanName) return callback?.({ ok: false, error: '변경할 닉네임을 입력해 주세요.' });
+    if (cleanName === p.nickname) {
+      return callback?.({ ok: true, nickname: p.nickname });
+    }
+    for (const other of state.players.values()) {
+      if (other.token !== p.token && other.nickname.toLowerCase() === cleanName.toLowerCase()) {
+        return callback?.({ ok: false, error: '이미 사용 중인 닉네임입니다.' });
+      }
+    }
+    p.nickname = cleanName;
+    broadcastState();
+    return callback?.({ ok: true, nickname: cleanName });
+  });
+
   socket.on('game:request_state', () => {
     broadcastState();
   });

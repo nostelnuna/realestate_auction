@@ -168,6 +168,16 @@
       }
     });
 
+    function changeNickname() {
+      const input = document.getElementById('renameInput');
+      if (!input) return;
+      const newNickname = input.value.trim();
+      if (!newNickname) return alert('변경할 닉네임을 입력해 주세요.');
+      socket.emit('player:change_nickname', { newNickname }, (res) => {
+        if (!res?.ok) alert(res?.error || '닉네임 변경에 실패했습니다.');
+      });
+    }
+
     function joinGame() {
       const nickname = document.getElementById('nicknameInput').value.trim();
       const errEl = document.getElementById('joinError');
@@ -338,7 +348,18 @@
         }
         renderPhaseMain(st, me);
       } else if (st.phase === 'LOBBY') {
+        const renameEl = document.getElementById('renameInput');
+        const isTyping = renameEl && document.activeElement === renameEl;
+        const draftVal = isTyping ? renameEl.value : null;
         renderPhaseMain(st, me);
+        if (isTyping) {
+          const newEl = document.getElementById('renameInput');
+          if (newEl) {
+            newEl.value = draftVal;
+            newEl.focus();
+            newEl.setSelectionRange(draftVal.length, draftVal.length);
+          }
+        }
       }
 
       renderLiveStatus(st);
@@ -349,6 +370,12 @@
       if (st.phase === 'LOBBY') {
         box.innerHTML = `
           <div class="glass rounded-2xl p-4 space-y-3">
+            <div class="flex gap-2 pb-3 border-b border-slate-800">
+              <input id="renameInput" type="text" maxlength="16" value="${escapeHtml(me.nickname)}" placeholder="새 닉네임 입력"
+                onkeydown="if(event.key==='Enter') changeNickname()"
+                class="flex-1 px-3 py-2 rounded-xl bg-slate-900 border border-slate-700 text-white text-xs focus:outline-none focus:border-amber-400" />
+              <button onclick="changeNickname()" class="tap-btn px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-amber-300 border border-amber-500/40 text-xs font-bold shrink-0">닉네임 변경</button>
+            </div>
             <div class="flex items-center justify-between">
               <h3 class="font-bold text-sm text-white">접속 중인 참가자 (${st.players.length}/35)</h3>
               <span class="text-[11px] text-slate-400">1명 이상 시 시작 가능</span>
