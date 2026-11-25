@@ -37,7 +37,6 @@
 
     <div class="flex items-center gap-4">
       <div id="hostTimer" class="hidden px-5 py-2 rounded-2xl bg-slate-900 border border-amber-500/50 text-amber-300 font-mono text-3xl font-black">00s</div>
-      <button onclick="toggleRankAmounts()" id="rankAmtBtn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 border border-slate-700">💰 순위 금액 OFF</button>
       <button onclick="toggleTts()" id="ttsBtn" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-emerald-300 border border-emerald-500/30">🔊 음성 안내 ON</button>
       <div id="hostToolbar" class="flex items-center gap-2"></div>
     </div>
@@ -68,8 +67,6 @@
     let hostToken = localStorage.getItem('re_host_token') || null;
     let selectedRounds = 15;
     let ttsEnabled = true;
-    let showRankAmounts = false;
-    let latestHostState = null;
     let lastSpokenKey = null;
 
     function fmtBillion(units) {
@@ -112,16 +109,6 @@
       socket.emit('game:request_state');
     }
 
-    function toggleRankAmounts() {
-      showRankAmounts = !showRankAmounts;
-      const btn = document.getElementById('rankAmtBtn');
-      btn.textContent = showRankAmounts ? '💰 순위 금액 ON' : '💰 순위 금액 OFF';
-      btn.className = showRankAmounts
-        ? 'px-3.5 py-2 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-xs font-bold text-amber-300 border border-amber-400/50'
-        : 'px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs font-bold text-slate-300 border border-slate-700';
-      if (latestHostState) renderHostState(latestHostState);
-    }
-
     function toggleTts() {
       ttsEnabled = !ttsEnabled;
       const btn = document.getElementById('ttsBtn');
@@ -146,8 +133,15 @@
       el.textContent = paused ? `⏸ ${timer}s` : `${timer}s`;
     });
 
+    socket.on('connect', () => {
+      if (hostToken) {
+        socket.emit('host:auth', { hostToken }, (r) => {
+          if (r?.ok) unlockHost();
+        });
+      }
+    });
+
     socket.on('game:state', (st) => {
-      latestHostState = st;
       renderHostState(st);
     });
 
@@ -362,27 +356,7 @@
                 }).join('')}
               </div>
             </div>
-            <div class="pt-4 border-t border-slate-800 space-y-3">
-              <div class="flex items-center justify-between">
-                <h3 class="text-base font-bold text-emerald-300">🏅 ${st.round}라운드 중간 순위</h3>
-                <span class="text-xs text-slate-400">${showRankAmounts ? '방장 금액 공개 ON (현금 + 건물 감정가)' : '자산 총액 비공개 · 순위만 공개'}</span>
-              </div>
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-2.5">
-                ${(st.rankings || []).map((r) => {
-                  const medal = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : `${r.rank}위`;
-                  const hasAmt = showRankAmounts && typeof r.totalAsset === 'number';
-                  return `
-                    <div class="px-4 py-2.5 rounded-xl bg-slate-900/90 border border-slate-800 flex items-center justify-between gap-2 text-sm">
-                      <div class="flex items-center gap-2.5 min-w-0">
-                        <span class="font-extrabold text-amber-300 shrink-0">${medal}</span>
-                        <span class="font-bold text-white truncate">${escapeHtml(r.nickname)}</span>
-                      </div>
-                      ${hasAmt ? `<span class="shrink-0 font-mono text-xs font-bold text-amber-300">${fmtBillion(r.totalAsset)} <span class="text-slate-400 font-normal">(현금 ${fmtBillion(r.cash)} + 매물 ${fmtBillion(r.propTotal)})</span></span>` : ''}
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
+
           </div>
         ` : ''}
       `;

@@ -239,10 +239,7 @@ function computeFinalRankings() {
 }
 
 function broadcastState() {
-  const rawRankings = (state.phase === 'RESULT' || state.phase === 'GAME_OVER') ? computeFinalRankings() : [];
-  const safeRankings = state.phase === 'RESULT'
-    ? rawRankings.map((r) => ({ rank: r.rank, token: r.token, nickname: r.nickname }))
-    : rawRankings;
+  const finalRankings = state.phase === 'GAME_OVER' ? computeFinalRankings() : [];
 
   for (const s of io.sockets.sockets.values()) {
     const myToken = s.data?.playerToken || null;
@@ -302,7 +299,7 @@ function broadcastState() {
       resultLogs: state.resultLogs,
       secretHistory: state.phase === 'GAME_OVER' ? state.secretHistory : [],
       players: publicPlayers,
-      rankings: (state.phase === 'GAME_OVER' || isHost) ? rawRankings : safeRankings,
+      rankings: finalRankings,
       appearedPropertiesRankings: state.phase === 'GAME_OVER'
         ? [...state.appearedLots]
             .sort((a, b) => b.appraisal - a.appraisal)
@@ -394,7 +391,7 @@ function startBiddingPhase() {
     return lotObj;
   });
 
-  startTimer(90, settleRound);
+  startTimer(70, settleRound);
 }
 
 function settleRound() {
@@ -566,7 +563,27 @@ io.on('connection', (socket) => {
     const cleanName = String(nickname || '').trim().slice(0, 16);
     if (!cleanName) return callback?.({ ok: false, error: '닉네임을 입력해 주세요.' });
     if (state.phase !== 'LOBBY') {
-      return callback?.({ ok: false, error: '이미 경매가 진행 중입니다. 다음 판을 기다려 주세요.' });
+      // 게임 진행 중 접속이 끊긴 참가자가 동일 닉네임으로 재입장할 경우 기존 세션 복구 허용
+      for (const existing of state.players.values()) {
+        if (existing.nickname.toLowerCase() === cleanName.toLowerCase()) {
+          const activeSock = existing.socketId ? io.sockets.sockets.get(existing.socketId) : null;
+          if (!existing.connected || !activeSock || !activeSock.connected) {
+            existing.socketId = socket.id;
+            existing.connected = true;
+            socket.data.playerToken = existing.token;
+            broadcastState();
+            return callback?.({
+              ok: true,
+              token: existing.token,
+              nickname: existing.nickname,
+              myBid: state.bids.get(existing.token) || null,
+              chatHistory: state.chatHistory.slice(-40),
+            });
+          }
+          return callback?.({ ok: false, error: '해당 닉네임은 현재 다른 기기에서 접속 중입니다.' });
+        }
+      }
+      return callback?.({ ok: false, error: '이미 경매가 진행 중입니다. 기존 닉네임으로 다시 입장하거나 다음 판을 기다려 주세요.' });
     }
     if (state.players.size >= 35) {
       return callback?.({ ok: false, error: '최대 정원(35명)이 가득 찼습니다.' });

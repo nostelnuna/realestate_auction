@@ -65,12 +65,9 @@
 
     <!-- 방장 컨트롤 패널 -->
     <section id="hostControls" class="hidden glass rounded-2xl p-4 border-amber-500/40 space-y-3">
-      <div class="flex items-center justify-between gap-2">
+      <div class="flex items-center justify-between">
         <span class="text-xs font-bold text-amber-400">👑 방장 제어 패널</span>
-        <div class="flex items-center gap-2">
-          <button onclick="toggleRankAmounts()" id="idxRankAmtBtn" class="tap-btn px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700">💰 순위 금액 OFF</button>
-          <a href="/host" target="_blank" class="text-xs text-sky-400 underline">전광판 ↗</a>
-        </div>
+        <a href="/host" target="_blank" class="text-xs text-sky-400 underline">전광판 열기 ↗</a>
       </div>
       <div id="hostLobbyControls" class="flex flex-wrap items-center gap-2">
         <div class="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-700">
@@ -136,7 +133,6 @@
     let myToken = localStorage.getItem('re_player_token') || null;
     let hostToken = localStorage.getItem('re_host_token') || null;
     let isHost = false;
-    let showRankAmounts = false;
     let selectedRounds = 15;
     let latestState = null;
     let lastRenderedPhaseKey = null;
@@ -150,22 +146,30 @@
       return `${(units / 10).toFixed(1)}억`;
     }
 
-    window.addEventListener('DOMContentLoaded', () => {
+    function restoreSession() {
       if (hostToken) {
         socket.emit('host:auth', { hostToken }, (res) => {
           if (res?.ok) applyHostState();
-          else localStorage.removeItem('re_host_token');
+          else {
+            localStorage.removeItem('re_host_token');
+            hostToken = null;
+          }
         });
       }
       if (myToken) {
         socket.emit('player:join', { token: myToken }, (res) => {
-          if (res?.ok) onJoinedSuccess(res);
-          else {
+          if (res?.ok) {
+            onJoinedSuccess(res);
+          } else {
             localStorage.removeItem('re_player_token');
             myToken = null;
           }
         });
       }
+    }
+
+    socket.on('connect', () => {
+      restoreSession();
     });
 
     function changeNickname() {
@@ -224,21 +228,6 @@
         closeHostModal();
       });
     }
-    function toggleRankAmounts() {
-      showRankAmounts = !showRankAmounts;
-      const btn = document.getElementById('idxRankAmtBtn');
-      if (btn) {
-        btn.textContent = showRankAmounts ? '💰 순위 금액 ON' : '💰 순위 금액 OFF';
-        btn.className = showRankAmounts
-          ? 'tap-btn px-2.5 py-1 rounded-lg bg-amber-500/20 text-[11px] font-bold text-amber-300 border border-amber-400/50'
-          : 'tap-btn px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-[11px] font-bold text-slate-300 border border-slate-700';
-      }
-      if (latestState) {
-        const me = latestState.players.find((p) => p.token === myToken);
-        if (me) renderPhaseMain(latestState, me);
-      }
-    }
-
     function applyHostState() {
       isHost = true;
       document.getElementById('hostAuthBtn').textContent = '👑 방장됨';
@@ -445,28 +434,7 @@
                 }).join('')}
               </div>
             </div>
-            <div class="pt-3 border-t border-slate-800 space-y-2">
-              <div class="flex items-center justify-between">
-                <h4 class="font-bold text-xs text-emerald-300">🏅 ${st.round}라운드 중간 순위</h4>
-                <span class="text-[10px] text-slate-400">${isHost && showRankAmounts ? '방장 금액 공개 ON' : '자산 총액 비공개 · 순위만 공개'}</span>
-              </div>
-              <div class="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                ${(st.rankings || []).map((r) => {
-                  const isMe = r.token === myToken;
-                  const medal = r.rank === 1 ? '🥇' : r.rank === 2 ? '🥈' : r.rank === 3 ? '🥉' : `${r.rank}위`;
-                  const hasAmt = isHost && showRankAmounts && typeof r.totalAsset === 'number';
-                  return `
-                    <div class="px-3 py-2 rounded-xl ${isMe ? 'bg-emerald-500/20 border-emerald-400' : 'bg-slate-900/80 border-slate-800'} border flex items-center justify-between gap-2 text-xs">
-                      <div class="flex items-center gap-2 min-w-0">
-                        <span class="font-extrabold w-7 text-center shrink-0">${medal}</span>
-                        <span class="font-bold text-white truncate">${escapeHtml(r.nickname)} ${isMe ? '<span class="text-[10px] text-emerald-400">(나)</span>' : ''}</span>
-                      </div>
-                      ${hasAmt ? `<span class="shrink-0 font-mono text-[11px] font-bold text-amber-300">${fmtBillion(r.totalAsset)}</span>` : ''}
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
+
           </div>
         `;
         return;
